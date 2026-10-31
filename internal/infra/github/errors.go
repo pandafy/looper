@@ -12,6 +12,12 @@ type TransientError struct {
 	Err error
 }
 
+// IsCaptureTruncated identifies a local output limit rather than a remote failure.
+func IsCaptureTruncated(err error) bool {
+	var commandErr *shell.CommandExecutionError
+	return errors.As(err, &commandErr) && (commandErr.Result.StdoutTruncated || commandErr.Result.StderrTruncated)
+}
+
 func (e *TransientError) Error() string {
 	return fmt.Sprintf("transient GitHub error: %v", e.Err)
 }
@@ -25,6 +31,9 @@ func (e *TransientError) Unwrap() error {
 // terminal loop failure.
 func IsTransientError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if IsCaptureTruncated(err) {
 		return false
 	}
 	var transientErr *TransientError

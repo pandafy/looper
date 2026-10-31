@@ -2396,7 +2396,7 @@ func withHostingAPIBoundary(err error) error {
 //   - gh exits 0 with malformed/empty JSON and gateway emits
 //     `Invalid gh JSON payload` via invalidJSONError — still local decode
 //     contract, not a remote transport outage
-//   - shell capture exceeds the 256 KiB bound: runGhWithTimeout returns
+//   - shell capture exceeds its configured bound: runGhWithTimeout returns
 //     CommandExecutionError with StdoutTruncated/StderrTruncated and message
 //     "GitHub command output truncated" — local buffer limit, not API outage
 //

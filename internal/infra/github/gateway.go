@@ -31,6 +31,7 @@ const (
 	defaultGhCommandTimeout = 60 * time.Second
 	prListGhCommandTimeout  = 15 * time.Second
 	prDiffGhCommandTimeout  = 180 * time.Second
+	prViewMaxCaptureBytes   = 4 * 1024 * 1024
 )
 
 var (
@@ -1542,7 +1543,7 @@ func pullRequestDetailFromViewRow(row map[string]any, threads []map[string]any, 
 }
 
 func (g *Gateway) viewPullRequestRow(ctx context.Context, input ViewPullRequestInput, fields []string) (map[string]any, error) {
-	result, err := g.runGh(ctx, input.CWD, "", "pr", "view", fmt.Sprintf("%d", input.PRNumber), "--repo", input.Repo, "--json", strings.Join(fields, ","))
+	result, err := g.runGhWithCaptureLimit(ctx, input.CWD, "", defaultGhCommandTimeout, prViewMaxCaptureBytes, "pr", "view", fmt.Sprintf("%d", input.PRNumber), "--repo", input.Repo, "--json", strings.Join(fields, ","))
 	if err != nil {
 		return nil, err
 	}
@@ -3403,7 +3404,11 @@ func (g *Gateway) runGh(ctx context.Context, cwd, stdin string, args ...string) 
 }
 
 func (g *Gateway) runGhWithTimeout(ctx context.Context, cwd, stdin string, timeout time.Duration, args ...string) (shell.Result, error) {
-	result, err := g.ghRun(ctx, shell.Options{Command: g.ghPath, Args: args, CWD: valueOr(strings.TrimSpace(cwd), g.cwd), Stdin: stdin, Timeout: timeout})
+	return g.runGhWithCaptureLimit(ctx, cwd, stdin, timeout, 0, args...)
+}
+
+func (g *Gateway) runGhWithCaptureLimit(ctx context.Context, cwd, stdin string, timeout time.Duration, maxCapturedBytes int, args ...string) (shell.Result, error) {
+	result, err := g.ghRun(ctx, shell.Options{Command: g.ghPath, Args: args, CWD: valueOr(strings.TrimSpace(cwd), g.cwd), Stdin: stdin, Timeout: timeout, MaxCapturedBytes: maxCapturedBytes})
 	if result.StdoutTruncated || result.StderrTruncated {
 		streams := make([]string, 0, 2)
 		if result.StdoutTruncated {

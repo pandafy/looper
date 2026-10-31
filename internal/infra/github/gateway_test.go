@@ -3002,3 +3002,75 @@ func TestReviewEngagementSelfBlockingFallbackStillMatchesAuthorAndHead(t *testin
 		})
 	}
 }
+
+func TestPullRequestViewsCaptureLargeOutput(t *testing.T) {
+	payload := `{"number":42,"headRefOid":"head","baseRefOid":"base","author":{"login":"octocat"},"mergeStateStatus":"DIRTY","statusCheckRollup":[{"name":"` + strings.Repeat("x", 512*1024) + `"}]}`
+	for _, profile := range []string{"metadata", "fixer", "reviewer"} {
+		t.Run(profile, func(t *testing.T) {
+			runner := &fakeGHRunner{t: t}
+			runner.respond = func(options shell.Options) (shell.Result, error) {
+				args := strings.Join(options.Args, " ")
+				switch {
+				case strings.HasPrefix(args, "pr view "):
+					if options.MaxCapturedBytes < len(payload) {
+						return shell.Result{Stdout: payload[:256*1024], StdoutTruncated: true}, nil
+					}
+					return shell.Result{Stdout: payload}, nil
+				case strings.Contains(args, "reviewThreads"):
+					return shell.Result{Stdout: `{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}}`}, nil
+				case strings.HasPrefix(args, "api user"):
+					return shell.Result{Stdout: "bot\n"}, nil
+				case strings.Contains(args, "/issues/42/comments"):
+					return shell.Result{}, nil
+				default:
+					t.Fatalf("unexpected command: %s", args)
+					return shell.Result{}, nil
+				}
+			}
+			gateway := New(Options{GHPath: "gh", GHRun: runner.run})
+			input := ViewPullRequestInput{Repo: "acme/looper", PRNumber: 42}
+			var detail PullRequestDetail
+			var err error
+			switch profile {
+			case "metadata":
+				detail, err = gateway.ViewPullRequest(context.Background(), input)
+			case "fixer":
+				detail, err = gateway.ViewPullRequestForFixer(context.Background(), input)
+			case "reviewer":
+				detail, err = gateway.ViewPullRequestForReviewer(context.Background(), input)
+			}
+			if err != nil {
+				t.Fatalf("view: %v", err)
+			}
+			if detail.HeadSHA != "head" || detail.BaseSHA != "base" || detail.Author != "octocat" || !detail.HasConflicts || len(detail.Checks) != 1 {
+				t.Fatalf("unexpected detail: head=%q base=%q author=%q conflicts=%v checks=%d", detail.HeadSHA, detail.BaseSHA, detail.Author, detail.HasConflicts, len(detail.Checks))
+			}
+		})
+	}
+}
+
+func TestOversizedPRViewKeepsMetadataProfileAvailable(t *testing.T) {
+	runner := &fakeGHRunner{t: t}
+	runner.respond = func(options shell.Options) (shell.Result, error) {
+		args := strings.Join(options.Args, " ")
+		if !strings.HasPrefix(args, "pr view ") {
+			t.Fatalf("unexpected command: %s", args)
+		}
+		if strings.Contains(args, "statusCheckRollup") {
+			return shell.Result{Stdout: strings.Repeat("x", options.MaxCapturedBytes), StdoutTruncated: true}, nil
+		}
+		return shell.Result{Stdout: `{"number":42,"headRefOid":"head","baseRefOid":"base","author":{"login":"octocat"},"labels":[{"name":"bug"}],"mergeStateStatus":"DIRTY"}`}, nil
+	}
+	gateway := New(Options{GHPath: "gh", GHRun: runner.run})
+	input := ViewPullRequestInput{Repo: "acme/looper", PRNumber: 42}
+	if _, err := gateway.ViewPullRequestForFixer(context.Background(), input); !IsCaptureTruncated(err) {
+		t.Fatalf("fixer view error = %v, want capture truncation", err)
+	}
+	detail, err := gateway.ViewPullRequest(context.Background(), input)
+	if err != nil {
+		t.Fatalf("metadata view: %v", err)
+	}
+	if detail.HeadSHA != "head" || detail.BaseSHA != "base" || detail.Author != "octocat" || !detail.HasConflicts || len(detail.Labels) != 1 || detail.Labels[0] != "bug" {
+		t.Fatalf("metadata view = %#v", detail)
+	}
+}
