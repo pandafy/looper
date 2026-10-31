@@ -8250,6 +8250,9 @@ func (r *Runner) classifyFailureForProject(projectID string, err error) *loopErr
 }
 
 func (r *Runner) classifyFailureForProjectAndBoundary(projectID string, err error, boundary failureclass.Boundary) *loopError {
+	if githubinfra.IsCaptureTruncated(err) {
+		return &loopError{message: err.Error(), kind: FailureNonRetryable}
+	}
 	var typed *loopError
 	if errors.As(err, &typed) {
 		return typed
@@ -8306,6 +8309,9 @@ func (r *Runner) isTransientExternalFailure(err error) bool {
 
 func (r *Runner) isTransientExternalFailureForProject(projectID string, err error) bool {
 	if err == nil {
+		return false
+	}
+	if githubinfra.IsCaptureTruncated(err) {
 		return false
 	}
 	retryPolicy := r.retryPolicyForProject(projectID)

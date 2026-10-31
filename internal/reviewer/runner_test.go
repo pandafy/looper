@@ -14694,3 +14694,14 @@ func (f *fakeGitGateway) ReadPullRequestDiff(_ context.Context, _, _, _ string) 
 	}
 	return "diff --git a/app.go b/app.go\n@@ -1 +1,2 @@\n-old\n+new\n+more\n", nil
 }
+
+func TestTruncatedGitHubCaptureIsNotTransient(t *testing.T) {
+	err := &shell.CommandExecutionError{Message: "GitHub command output truncated: stdout after 4194304 bytes", Result: shell.Result{Stdout: "HTTP 503 service unavailable", StdoutTruncated: true}}
+	runner := New(Options{RetryPolicy: config.ReviewerRetryConfig{EnhancedTransientClassification: true}})
+	if runner.isTransientExternalFailure(err) {
+		t.Fatal("truncated capture must not be retried as a remote failure")
+	}
+	if got := runner.classifyFailureForProjectAndBoundary("", err, failureclass.BoundaryGitHubAPI); got.kind != FailureNonRetryable {
+		t.Fatalf("failure kind = %s, want %s", got.kind, FailureNonRetryable)
+	}
+}
